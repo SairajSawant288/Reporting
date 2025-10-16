@@ -1,0 +1,12 @@
+# Virtual environment folders
+venv/
+.venv/
+
+
+# macOS system files
+.DS_Store
+
+
+# Ignore logs directory and all .log files inside
+logs/
+*.log
