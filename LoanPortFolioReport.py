@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import logging
 from pathlib import Path
+from datetime import datetime
+import os
 
 
 class LoanPortfolioReportAutomationPandas:
@@ -11,12 +13,27 @@ class LoanPortfolioReportAutomationPandas:
         self.output_report = None
 
     def setup_logging(self):
+        # Ensure logs folder exists
+        if not os.path.exists('logs'):
+            os.makedirs('logs')
+        
+        # File path for log file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = os.path.join('logs', f'loan_portfolio_{timestamp}.log')
+        
+        # Configure logging
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[logging.StreamHandler()]
+            handlers=[
+                logging.StreamHandler(),                # Console output
+                logging.FileHandler(log_file, mode='a') # File output, append mode
+            ],
+            force=True  # ensures config is applied even if called multiple times
         )
-        return logging.getLogger('LoanPortfolioAutomationPandas')
+        
+        self.logger = logging.getLogger('LoanPortfolioAutomationPandas')
+        return self.logger
 
     def load_all_dataframes(self):
         self.logger.info("Loading all data CSV files into DataFrames")
@@ -74,9 +91,7 @@ class LoanPortfolioReportAutomationPandas:
             return 'Retail'
         
         df['TYPE'] = df.apply(classify_type, axis=1)
-        #Test
-        # print(df.columns)
-        # df.to_csv("test.csv",index=False)
+        
 
         df['unbilled_adv_emi'] = df.get('GROSS_ADVANCE_INSTL_AMT', 0).fillna(0) - df.get('GROSS_BILLED_ADVANCE_INSTL_AMT', 0).fillna(0)
         df['total_osp_from_finone'] = df.get('UNBILLED_PRINCIPAL_AMOUNT', 0)
@@ -93,7 +108,7 @@ class LoanPortfolioReportAutomationPandas:
         write_off_renamed = self.write_off_lans.rename(columns={'LAN': 'LOAN_ACCOUNT_NO', 'WRITE OFF': 'write_off_status', 'Month': 'write_off_date'})
         df = pd.merge(df, write_off_renamed[['LOAN_ACCOUNT_NO', 'write_off_status', 'write_off_date']], on='LOAN_ACCOUNT_NO', how='left')
         df['write_off_status'] = df['write_off_status'].fillna('NO')
-        # print(df)
+        
         self.output_report = df
         self.logger.info("output_report DataFrame created")
 
@@ -161,7 +176,7 @@ class LoanPortfolioReportAutomationPandas:
         df['morat_principal_from_tab'] = df['LOAN_ACCOUNT_NO'].map(morat_dict).fillna(0)
         df.loc[df['write_off_status'] == 'YES', 'morat_principal_from_tab'] = 0
         df.loc[df['MANAGED_DA_PTC'] == 'Managed - ARC', 'morat_principal_from_tab'] = 0
-        # print(df.info())
+        
         df['aum_including_written_off'] = df['osp_final_excluding_write_off'].fillna(0) + df['principal_od_own_from_par'].fillna(0) + df['morat_principal_from_tab'].fillna(0)
 
         df['write_off_amt'] = 0
@@ -193,22 +208,19 @@ class LoanPortfolioReportAutomationPandas:
 
         # Future owned shares
         def calc_future_owned_shares(row):
-            # print("row")
-            # print(row)
+            
             # Lookup OWN_SHARE for the row’s type and DA_PTC_TRANCH_WISE_AUM
             type_match = srm.loc[srm['DA_PTC_TRANCH_WISE_AUM'] == row['TYPE'], 'OWN_SHARE']
             daptc_match = srm.loc[srm['DA_PTC_TRANCH_WISE_AUM'] == row['DA_PTC_TRANCH_WISE_AUM'], 'OWN_SHARE']
-            # print("Type match",type_match)
-            # print("daptc match",daptc_match)
+            
             # If lookup yields no rows, treat share as 0
             type_share = float(type_match.iloc[0]) if not type_match.empty and pd.notna(type_match.iloc[0]) else 0.0
             daptc_share = float(daptc_match.iloc[0]) if not daptc_match.empty and pd.notna(daptc_match.iloc[0]) else 0.0
 
-            # print("Type share",type_share)
-            # print("daptc share",daptc_share)
+            
             overdue = row.get('OSP_Final_Min_ADVANCE_EMI', 0.0) or 0.0
 
-            # print("overdue",overdue)
+            
             # If overdue is missing or zero, result is zero
             if overdue <= 0:
                 return 0.0
@@ -217,8 +229,7 @@ class LoanPortfolioReportAutomationPandas:
             type_per = type_share / 100.0
             daptc_per = daptc_share / 100.0
 
-            # print("Type per",type_per)
-            # print("daptc per",daptc_per)
+           
             # If either percentage is zero, result is zero
             if type_per == 0.0 and daptc_per == 0.0:
                 return overdue
@@ -244,22 +255,19 @@ class LoanPortfolioReportAutomationPandas:
 
         # MORAT_OWN_AMOUNT
         def calc_morat_own_amount(row):
-            # print("row")
-            # print(row)
+            
             # Lookup OWN_SHARE for the row’s type and DA_PTC_TRANCH_WISE_AUM
             type_match = srm.loc[srm['DA_PTC_TRANCH_WISE_AUM'] == row['TYPE'], 'OWN_SHARE']
             daptc_match = srm.loc[srm['DA_PTC_TRANCH_WISE_AUM'] == row['DA_PTC_TRANCH_WISE_AUM'], 'OWN_SHARE']
-            # print("Type match",type_match)
-            # print("daptc match",daptc_match)
+            
             # If lookup yields no rows, treat share as 0
             type_share = float(type_match.iloc[0]) if not type_match.empty and pd.notna(type_match.iloc[0]) else 0.0
             daptc_share = float(daptc_match.iloc[0]) if not daptc_match.empty and pd.notna(daptc_match.iloc[0]) else 0.0
 
-            # print("Type share",type_share)
-            # print("daptc share",daptc_share)
+            
             overdue = row.get('morat_principal_from_tab', 0.0) or 0.0
 
-            # print("overdue",overdue)
+            
             # If overdue is missing or zero, result is zero
             if overdue <= 0:
                 return 0.0
@@ -268,8 +276,7 @@ class LoanPortfolioReportAutomationPandas:
             type_per = type_share / 100.0
             daptc_per = daptc_share / 100.0
 
-            # print("Type per",type_per)
-            # print("daptc per",daptc_per)
+            
             # If either percentage is zero, result is zero
             if type_per == 0.0 and daptc_per == 0.0:
                 # print("Inside Overdue")
@@ -287,8 +294,7 @@ class LoanPortfolioReportAutomationPandas:
                 result = round(overdue * daptc_per,2)
                 return max(result, 0.0)
             
-        # df = df[(df['LOAN_ACCOUNT_NO'] == 'BHRN2WA002044') ]
-        # | (df['LOAN_ACCOUNT_NO'] == 'JANN2W000005034582') | (df['LOAN_ACCOUNT_NO'] == 'MUMVCU000005283597')]
+
         df['MORAT_OWN_AMOUNT'] = df.apply(calc_morat_own_amount,axis=1)
 
         df['MORAT_MANAGED_AMOUNT'] = df['morat_principal_from_tab'] - df['MORAT_OWN_AMOUNT']
@@ -308,11 +314,12 @@ class LoanPortfolioReportAutomationPandas:
 
         #Testing Remaining
         df['MONTH_END_DPD'] = np.where(df['CLOSING_EMI_OVERDUE'] > 0,df['DPD'],'')
-
         df = pd.merge(df, self.portfolio_report_opening, on='LOAN_ACCOUNT_NO', how='left')
         # df.rename(columns={'ASSET_CLASSIFICATION':'ASSET_CLASSIFICATION_FINONE'},inplace=True)
-        df['ASSET_CLASSIFICATION_FINONE'] = np.where(df['CLOSING_EMI_OVERDUE'] > 0,df['ASSET_CLASSIFICATION'],'')
-        df['DATE_OF_MATURITY'] = df['MATURITYDATE'].copy()
+
+        #NOTE ASSET CLASSIFICATION is present in both dataframe which one to consider?
+        # df['ASSET_CLASSIFICATION_FINONE'] = np.where(df['CLOSING_EMI_OVERDUE'] > 0,df['ASSET_CLASSIFICATION'],'')
+        # df['DATE_OF_MATURITY'] = df['MATURITYDATE'].copy()
         
 
         self.output_report = df
