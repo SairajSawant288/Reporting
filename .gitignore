@@ -10,3 +10,5 @@ venv/
 # Ignore logs directory and all .log files inside
 logs/
 *.log
+
+.excel_open.py
