@@ -186,7 +186,9 @@ class LoanPortfolioReportAutomationPandas:
         df['osp_final_excluding_write_off'] = df['osp_final'].copy()
         df.loc[df['write_off_status'] == 'YES', 'osp_final_excluding_write_off'] = 0
 
+        amr = amr.dropna(subset=['LOAN_ACCOUNT_NO'])
         overdue_dict = amr.set_index('LOAN_ACCOUNT_NO')['OVERDUE_PRIN_AMT'].to_dict()
+        
         df['OVERDUE_PRIN_AMT'] = df['LOAN_ACCOUNT_NO'].map(overdue_dict)
         df['overdue_prin_amt_excluding_write_off'] = df['OVERDUE_PRIN_AMT'].copy()
         df.loc[df['MANAGED_DA_PTC'] == 'Managed - ARC', 'overdue_prin_amt_excluding_write_off'] = 0
@@ -597,57 +599,61 @@ class LoanPortfolioReportAutomationPandas:
         #     else:
         #         return None
 
-        def calc_cal_managed_da_ptc(self, row):
-            """
-            Matches CAL_MANAGED_DA_PTC based on priority:
-            1) Match both TYPE and DA_PTC_TRANCH_WISE_AUM (if both exist)
-            2) If only TYPE exists → match TYPE
-            3) If only AUM exists → match DA_PTC_TRANCH_WISE_AUM
-            4) Else return None
-            """
+        def normalize_value(val):
+            # If it's a Series (multiple values), apply normalization element-wise
+            if isinstance(val, pd.Series):
+                return val.apply(lambda x: None if pd.isna(x) or str(x).strip()=="" else str(x).strip())
 
-            row_type = str(row.get('TYPE', '')).lower()
-            da_ptc_tranch_wise_aum = row.get('DA_PTC_TRANCH_WISE_AUM')
+            # Normal scalar value case
+            if pd.isna(val) or str(val).strip() == "":
+                return None
+            return str(val).strip()
 
-            # Determine normalized type
-            if 'co-lending' in row_type:
+
+
+        def calc_cal_managed_da_ptc(row):
+            # Normalize row values
+            row_type = normalize_value(row.get('TYPE'))
+            da_ptc_tranch_wise_aum = normalize_value(row.get('DA_PTC_TRANCH_WISE_AUM'))
+
+            # Determine normalized type bucket
+            if row_type and 'co-lending' in row_type.lower():
                 master_type = 'Co-Lending'
-            elif 'fldg' in row_type:
+            elif row_type and 'fldg' in row_type.lower():
                 master_type = 'FLDG'
             else:
                 master_type = 'Other'
 
-            master_df = self.cal_managed_da_ptc_master
+            master_df =  self.cal_managed_da_ptc_master.copy()
 
-            # ✅ Case 1: Both TYPE & AUM available
-            if master_type and pd.notna(da_ptc_tranch_wise_aum):
+            # Normalize master df
+            master_df['TYPE'] = master_df['TYPE'].apply(normalize_value)
+            master_df['DA_PTC_TRANCH_WISE_AUM'] = master_df['DA_PTC_TRANCH_WISE_AUM'].apply(normalize_value)
+
+
+            # ✅ 1: Match TYPE + AUM
+            if master_type and da_ptc_tranch_wise_aum:
                 matches = master_df[
-                    (master_df['TYPE'].str.lower() == master_type.lower()) &
+                    (master_df['TYPE'] == master_type) &
                     (master_df['DA_PTC_TRANCH_WISE_AUM'] == da_ptc_tranch_wise_aum)
                 ]
                 if not matches.empty:
                     return matches.iloc[0]['CAL_MANAGED_DA_PTC']
 
-            # ✅ Case 2: Only TYPE present
+            # ✅ 2: Match only AUM
+            if da_ptc_tranch_wise_aum:
+                matches = master_df[(master_df['TYPE'].isna()) &(master_df['DA_PTC_TRANCH_WISE_AUM'] == da_ptc_tranch_wise_aum)]
+                if not matches.empty:
+                    return matches.iloc[0]['CAL_MANAGED_DA_PTC']
+
+            # ✅ 3: Match only TYPE
             if master_type:
-                matches = master_df[
-                    master_df['TYPE'].str.lower() == master_type.lower()
-                ]
+                matches = master_df[(master_df['TYPE'] == master_type) &(master_df['DA_PTC_TRANCH_WISE_AUM'].isna())]
+
                 if not matches.empty:
                     return matches.iloc[0]['CAL_MANAGED_DA_PTC']
 
-            # ✅ Case 3: Only AUM present
-            if pd.notna(da_ptc_tranch_wise_aum):
-                matches = master_df[
-                    master_df['DA_PTC_TRANCH_WISE_AUM'] == da_ptc_tranch_wise_aum
-                ]
-                if not matches.empty:
-                    return matches.iloc[0]['CAL_MANAGED_DA_PTC']
-
-            # ❌ No match found
             return None
-
-
 
 
         df['CAL_MANAGED_DA_PTC'] = df.apply(calc_cal_managed_da_ptc,axis=1)
@@ -656,11 +662,66 @@ class LoanPortfolioReportAutomationPandas:
 
         df = pd.merge(df,co_lending_rate_master_report_df,on='LOAN_ACCOUNT_NO',how='left')
 
+        def cal_interest_od_own(row):
+            cal_managed = row.get('CAL_MANAGED_DA_PTC')
+            all_cal_managed_da_ptc_100 = ['Managed - FLDG','Managed - FLDG & Other','Managed - FLDG & PTC','Managed - FLDG & TL','Managed - Other','Managed - Own','Managed - PTC','Managed - TL']
+            all_cal_colending_own = ['Managed - Co-lending','Managed - Co-lending & PTC','Managed - Co-lending & TL','Managed - Co-lending & Other','Managed - Co-lending']
+            interest = row.get('TOTAL_INTEREST_OD_OWN_MANAGED')
+            if cal_managed in all_cal_managed_da_ptc_100:
+                return row.get('TOTAL_INTEREST_OD_OWN_MANAGED')
+            elif cal_managed in all_cal_colending_own:
+                co_lending_own_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('TYPE')]["OWN_SHARE"].values[0]
+                co_lending_managed_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('TYPE')]["Managed Share"].values[0]
+                irr = row.get('IRR')
+                co_lending_sharing_margin = row.get('CO_LENDING_INTREST_RATE')
+                result = (interest*(co_lending_own_share/100)) + (interest*(co_lending_managed_share/100)*((irr- co_lending_sharing_margin)/irr))
+                return round(result,2)
+            elif cal_managed in ['Managed - DA']:
+                da_own_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]["OWN_SHARE"].values[0]
+                da_managed_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]["Managed Share"].values[0]
+                da_shareing_margin = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]['Sharing margin out of IRR '].values[0]
+                irr = row.get('IRR')
+                result = (interest * (da_own_share/100)) +(interest * (da_managed_share/100) *((irr-da_shareing_margin)/irr))
+                return round(result,2)
+            elif cal_managed in ['Managed - FLDG & DA']:
+                irr = row.get('IRR')
+                fldg_managed_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('TYPE')]["Managed Share"].values[0]
+                fldg_own_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('TYPE')]["OWN_SHARE"].values[0]
+                da_own_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]["OWN_SHARE"].values[0]
+                da_managed_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]["Managed Share"].values[0]
+                da_shareing_margin = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]['Sharing margin out of IRR '].values[0]
+                result = (interest * (fldg_managed_share/100)) + (interest*(fldg_own_share/100)*(da_own_share/100)) + interest * (fldg_own_share/100) * (da_managed_share/100) * ((irr-da_shareing_margin)/irr)
+                return round(result,2)
+            elif cal_managed in ['Managed - Co-lending & DA']:
+                co_lending_own_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('TYPE')]["OWN_SHARE"].values[0]
+                da_own_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]["OWN_SHARE"].values[0]
+                co_lending_managed_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('TYPE')]["Managed Share"].values[0]
+                da_managed_share = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]["Managed Share"].values[0]
+                irr = row.get('IRR')
+                da_shareing_margin = self.sharing_ratio_master[self.sharing_ratio_master['DA_PTC_TRANCH_WISE_AUM']==row.get('DA_PTC_TRANCH_WISE_AUM')]['Sharing margin out of IRR '].values[0]
+                colending_interest_rate = row.get('CO_LENDING_INTREST_RATE')
+                result = (interest * (co_lending_own_share/100) * (da_own_share/100)) + (interest * (co_lending_managed_share/100) * ((irr - colending_interest_rate)/irr)) + (interest * (co_lending_own_share/100) * (da_managed_share/100) * ((irr-da_shareing_margin)/irr))
+                return result
+            elif cal_managed in ['Managed - ARC']:
+                return 0
+
+        df['INTEREST_OD_OWN'] = df.apply(cal_interest_od_own,axis=1)
+
+        def cal_interest_od_managed(row):
+            cal_managed = row.get('CAL_MANAGED_DA_PTC')
+            if cal_managed in ['Managed - ARC']:
+                return 0
+            else:
+                result = row.get('TOTAL_INTEREST_OD_OWN_MANAGED')-row.get('INTEREST_OD_OWN')
+                return result
+
+        df['INTEREST_OD_Managed'] = df.apply(cal_interest_od_managed,axis=1)
+
         # df['CO_LENDING_INTREST_RATE'] = 
         df.columns = df.columns.str.upper()
 
         
-
+        df = df.dropna(subset=['LOAN_ACCOUNT_NO'])
         self.output_report = df
         self.logger.info("Business logic processing completed")
 
