@@ -12,3 +12,9 @@ logs/
 *.log
 
 .excel_open.py
+*.csv
+*.xlsx
+*.ipynb
+*.zip
+excel_open.py
+test_excel.py
