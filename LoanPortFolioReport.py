@@ -376,6 +376,16 @@ class LoanPortfolioReportAutomationPandas:
         # df.to_csv("loan_portfolio_report.csv",index=False)
         # print("report completed")
         # 15th changes
+        #Standalone AUM Reporting RUN
+        df.columns = df.columns.str.upper()
+
+        
+        df = df.dropna(subset=['LOAN_ACCOUNT_NO'])
+        df.to_csv("Standalone_AUM_Reporting_RUN.csv",index=False)
+        print("Standalone AUM Reporting RUN completed")
+        #Overdue Report Join
+###. ----------------------------------AUM Reeport Comleted---------------------------------- ###
+
         overdue_report_df = self.overdue_report[['AGREEMENT_NO','EMI_OVERDUE','DPD']]
         df = pd.merge(df,overdue_report_df , left_on='LOAN_ACCOUNT_NO',right_on='AGREEMENT_NO', how='left')
         df['CLOSING_EMI_OVERDUE'] = df['EMI_OVERDUE'].copy()
@@ -393,10 +403,41 @@ class LoanPortfolioReportAutomationPandas:
         df.drop(columns=['ASSET_CLASSIFICATION'],inplace=True)
         df['DATE_OF_MATURITY'] = df['MATURITYDATE'].copy()
 
-        repo_stock_report_df = self.repo_stock_report[['Loan Number','Vehicle Status']]
-        repo_stock_report_df.rename(columns={'Loan Number':'LOAN_ACCOUNT_NO','Vehicle Status':'REPO_STOCK_TAGGING'},inplace=True)
+        # repo_stock_report_df = self.repo_stock_report[['Loan Number','Vehicle Status']]
+        # repo_stock_report_df.rename(columns={'Loan Number':'LOAN_ACCOUNT_NO','Vehicle Status':'REPO_STOCK_TAGGING'},inplace=True)
 
-        df = pd.merge(df,repo_stock_report_df,on='LOAN_ACCOUNT_NO',how='left')
+        # df = pd.merge(df,repo_stock_report_df,on='LOAN_ACCOUNT_NO',how='left')
+
+        # --- Repo stock report handling (file may not exist) ---
+
+        if (
+            self.repo_stock_report.empty or
+            not {'Loan Number', 'Vehicle Status'}.issubset(self.repo_stock_report.columns)
+        ):
+            self.logger.warning(
+                "Repo Stock report not available. Proceeding with empty REPO_STOCK_TAGGING."
+            )
+            repo_stock_report_df = pd.DataFrame(
+                columns=['LOAN_ACCOUNT_NO', 'REPO_STOCK_TAGGING']
+            )
+        else:
+            repo_stock_report_df = self.repo_stock_report[['Loan Number', 'Vehicle Status']].copy()
+            repo_stock_report_df.rename(
+                columns={
+                    'Loan Number': 'LOAN_ACCOUNT_NO',
+                    'Vehicle Status': 'REPO_STOCK_TAGGING'
+                },
+                inplace=True
+            )
+
+        # Safe merge
+        df = pd.merge(
+            df,
+            repo_stock_report_df,
+            on='LOAN_ACCOUNT_NO',
+            how='left'
+        )
+
 
         def sma_calculate(row):
             try:
