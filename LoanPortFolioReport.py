@@ -56,15 +56,15 @@ class LoanPortfolioReportAutomationPandas:
         self.logger.info("Loading all data CSV files into DataFrames")
 
         files = {
-            "aum_month_report": "aum_month_report.csv",
-            "sharing_ratio_master": "sharing_ratio_master.csv",
-            "bookdbet_tagging": "bookdbet_tagging.csv",
-            "bookdbet_tagging_product": "bookdbet_tagging_product.csv",
-            "write_off_lans": "write_off_lans.csv",
-            "morat_data": "morat_data.csv",
-            "foreclosure_tagging": "foreclosure_tagging.csv",
+            "aum_month_report": "Aum_Month_Report.csv",
+            "sharing_ratio_master": "SHARING_RATIO_MASTER.csv",
+            "bookdbet_tagging": "BOOKDBET_TAGGING.csv",
+            "bookdbet_tagging_product": "BOOKDBET_TAGGING_PRODUCT.csv",
+            "write_off_lans": "WRITE_OFF_LANS.csv",
+            "morat_data": "MORAT_Data.csv",
+            "foreclosure_tagging": "Foreclosure_Tagging.csv",
             "cal_managed_da_ptc_master": "CAL_MANAGED_DA_PTC_Master.csv",
-            "overdue_report": "overdue_report.csv",
+            "overdue_report": "OVERDUE_REPORT.csv",
             "portfolio_report_opening": "PORTFOLIO_REPORT_OPENING.csv",
             "repo_stock_report": "Repo_Stock_report.csv",
             "co_lending_rate_master_report": "co_lending_rate_master_report.csv"
